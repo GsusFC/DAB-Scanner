@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: #07080d;
+  --color-bg-panel: #11131a;
+  --color-bg-raised: #171922;
+  --color-bg-input: #0f1118;
+  --color-border: #252734;
+  --color-text: #f3f4f7;
+  --color-text-secondary: #a3a8bb;
+  --color-text-tertiary: #63697d;
+  --color-red: #ff6b57;
+  --color-green: #44c47a;
+  --color-blue: #5c7cff;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --shadow-panel: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { color-scheme: dark; }
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.6;
+  background-image:
+    radial-gradient(circle at top, rgba(92, 124, 255, 0.12), transparent 32%),
+    radial-gradient(circle at 20% 20%, rgba(255, 107, 87, 0.08), transparent 24%);
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.2;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(circle at center, black, transparent 75%);
+}
+::selection { background: var(--color-blue); color: #fff; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--color-text); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scaleIn {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes scanLine {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(100vh); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.8; }
+}
+@keyframes gaugeStroke {
+  from { stroke-dashoffset: var(--circumference); }
+  to { stroke-dashoffset: var(--offset); }
+}
+
+:root { --ease: cubic-bezier(0.16, 1, 0.3, 1); }
+
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: var(--color-bg); }
+::-webkit-scrollbar-thumb { background: var(--color-border); }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
