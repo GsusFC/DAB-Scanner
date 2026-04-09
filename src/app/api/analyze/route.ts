@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import * as cheerio from "cheerio";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // Compatible with any OpenAI-compatible API:
 // - Gemini:  AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai  AI_MODEL=gemini-2.0-flash
