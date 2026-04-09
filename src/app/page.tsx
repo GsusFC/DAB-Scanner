@@ -533,7 +533,7 @@ function Results({
   const summaryTone = scoreTone(result.score);
 
   return (
-    <main className="flex flex-col items-center gap-16 pb-40 sm:pb-48" style={{ ...PAD, paddingTop: "5rem", animation: "enter 0.5s var(--ease) both" }}>
+    <main className="flex flex-col items-center gap-8 pb-40 sm:pb-48" style={{ ...PAD, paddingTop: "5rem", animation: "enter 0.5s var(--ease) both" }}>
       <section className="w-full max-w-[920px]">
         <div className="grid w-full gap-x-16 gap-y-10 lg:grid-cols-[240px_minmax(0,1fr)] lg:items-start">
           <div className="flex justify-center lg:justify-end">
@@ -549,7 +549,7 @@ function Results({
                 {result.brandName || new URL(url).hostname} / Verdict
               </p>
             </div>
-            <h1 className="w-full text-[48px] font-semibold leading-[0.98] tracking-[-0.05em] text-balance">
+            <h1 className="w-full text-[clamp(1.5rem,4vw,2.25rem)] font-semibold leading-[1.1] tracking-[-0.03em] text-balance">
               {result.verdict}
             </h1>
             <p className="w-full max-w-[56rem] text-[15px] leading-5 text-text-secondary">
