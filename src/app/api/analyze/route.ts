@@ -2,17 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import * as cheerio from "cheerio";
 
+// Compatible with any OpenAI-compatible API:
+// - Gemini:  AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai  AI_MODEL=gemini-2.0-flash
+// - Groq:    AI_BASE_URL=https://api.groq.com/openai/v1                          AI_MODEL=llama-3.3-70b-versatile
+// - Nous:    AI_BASE_URL=https://inference-api.nousresearch.com/v1                AI_MODEL=deepseek/deepseek-v3.2
+// - OpenAI:  (no AI_BASE_URL needed)                                              AI_MODEL=gpt-4o
 function getClient() {
-  const apiKey = process.env.NOUS_API_KEY;
+  const apiKey = process.env.AI_API_KEY;
 
   if (!apiKey) {
-    throw new Error("Missing NOUS_API_KEY environment variable");
+    throw new Error("Missing AI_API_KEY environment variable");
   }
 
   return new OpenAI({
     apiKey,
-    baseURL:
-      process.env.NOUS_BASE_URL || "https://inference-api.nousresearch.com/v1",
+    ...(process.env.AI_BASE_URL && { baseURL: process.env.AI_BASE_URL }),
   });
 }
 
@@ -226,7 +230,7 @@ export async function POST(request: NextRequest) {
 
         const client = getClient();
         const completion = await client.chat.completions.create({
-          model: process.env.NOUS_MODEL || "deepseek/deepseek-v3.2",
+          model: process.env.AI_MODEL || "gemini-2.0-flash",
           max_tokens: 2000,
           temperature: 0.3,
           messages: [
