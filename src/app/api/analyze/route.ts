@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
 import * as cheerio from "cheerio";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +8,8 @@ export const dynamic = "force-dynamic";
 // - Groq:    AI_BASE_URL=https://api.groq.com/openai/v1                          AI_MODEL=llama-3.3-70b-versatile
 // - Nous:    AI_BASE_URL=https://inference-api.nousresearch.com/v1                AI_MODEL=deepseek/deepseek-v3.2
 // - OpenAI:  (no AI_BASE_URL needed)                                              AI_MODEL=gpt-4o
-function getClient() {
+async function getClient() {
+  const { default: OpenAI } = await import("openai");
   const apiKey = process.env.AI_API_KEY;
 
   if (!apiKey) {
@@ -230,7 +230,7 @@ export async function POST(request: NextRequest) {
 
         send({ stage: "analyzing" });
 
-        const client = getClient();
+        const client = await getClient();
         const completion = await client.chat.completions.create({
           model: process.env.AI_MODEL || "gemini-2.0-flash",
           max_tokens: 2000,
