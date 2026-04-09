@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import * as cheerio from "cheerio";
 
+export const dynamic = "force-dynamic";
+
 // Compatible with any OpenAI-compatible API:
 // - Gemini:  AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai  AI_MODEL=gemini-2.0-flash
 // - Groq:    AI_BASE_URL=https://api.groq.com/openai/v1                          AI_MODEL=llama-3.3-70b-versatile
