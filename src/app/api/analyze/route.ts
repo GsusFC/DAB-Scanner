@@ -2,10 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import * as cheerio from "cheerio";
 
-const client = new OpenAI({
-  apiKey: process.env.NOUS_API_KEY,
-  baseURL: process.env.NOUS_BASE_URL || "https://inference-api.nousresearch.com/v1",
-});
+function getClient() {
+  const apiKey = process.env.NOUS_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("Missing NOUS_API_KEY environment variable");
+  }
+
+  return new OpenAI({
+    apiKey,
+    baseURL:
+      process.env.NOUS_BASE_URL || "https://inference-api.nousresearch.com/v1",
+  });
+}
 
 async function scrapeWebsite(url: string) {
   try {
@@ -129,20 +138,10 @@ async function scrapeWebsite(url: string) {
   }
 }
 
-export async function POST(request: NextRequest) {
-  try {
-    const { url } = await request.json();
+const SYSTEM_PROMPT = `You are a senior brand strategist and design expert at FLOC*, a Web3 strategic design studio. You analyze brands through the lens of the DAB* (Decentralized Autonomous Brand) framework. Your analysis is sharp, specific, and honest. You never give generic feedback — you always reference specific elements from the data.`;
 
-    if (!url) {
-      return NextResponse.json({ error: "URL is required" }, { status: 400 });
-    }
-
-    // Scrape the website
-    const siteData = await scrapeWebsite(url);
-
-    const systemPrompt = `You are a senior brand strategist and design expert at FLOC*, a Web3 strategic design studio. You analyze brands through the lens of the DAB* (Decentralized Autonomous Brand) framework. Your analysis is sharp, specific, and honest. You never give generic feedback — you always reference specific elements from the data.`;
-
-    const userPrompt = `Analyze this website's brand and return a structured JSON assessment.
+function buildUserPrompt(siteData: Record<string, unknown>) {
+  return `Analyze this website's brand and return a structured JSON assessment.
 
 Website data:
 ${JSON.stringify(siteData, null, 2)}
@@ -180,45 +179,85 @@ Respond ONLY with valid JSON in this exact format, no markdown, no code blocks:
   "verdict": "string",
   "brandName": "string"
 }`;
+}
 
-    const completion = await client.chat.completions.create({
-      model: process.env.NOUS_MODEL || "deepseek/deepseek-v3.2",
-      max_tokens: 2000,
-      temperature: 0.3,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-    });
+function parseAnalysisJSON(text: string) {
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error("Could not parse AI response");
 
-    const text = completion.choices[0]?.message?.content;
-    if (!text) {
-      throw new Error("No response from AI");
-    }
+  let jsonStr = jsonMatch[0];
+  jsonStr = jsonStr.replace(/,\s*([}\]])/g, "$1");
+  jsonStr = jsonStr.replace(/,\s*,/g, ",");
 
-    // Parse the JSON response — sanitize common LLM JSON errors
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error("Could not parse AI response");
-    }
+  return JSON.parse(jsonStr);
+}
 
-    let jsonStr = jsonMatch[0];
-    // Fix trailing commas before } or ]
-    jsonStr = jsonStr.replace(/,\s*([}\]])/g, "$1");
-    // Fix duplicate commas
-    jsonStr = jsonStr.replace(/,\s*,/g, ",");
+export async function POST(request: NextRequest) {
+  const { url } = await request.json();
 
-    const analysis = JSON.parse(jsonStr);
-
-    return NextResponse.json(analysis);
-  } catch (error) {
-    console.error("Analysis error:", error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Analysis failed",
-      },
-      { status: 500 }
-    );
+  if (!url) {
+    return NextResponse.json({ error: "URL is required" }, { status: 400 });
   }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (event: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+
+      try {
+        send({ stage: "scraping" });
+
+        const siteData = await scrapeWebsite(url);
+
+        send({
+          stage: "scraped",
+          data: {
+            title: siteData.title,
+            headingsCount: siteData.headings.length,
+            linksCount: siteData.links.length,
+            imagesCount: siteData.images.length,
+            ctasCount: siteData.ctas.length,
+          },
+        });
+
+        send({ stage: "analyzing" });
+
+        const client = getClient();
+        const completion = await client.chat.completions.create({
+          model: process.env.NOUS_MODEL || "deepseek/deepseek-v3.2",
+          max_tokens: 2000,
+          temperature: 0.3,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: buildUserPrompt(siteData) },
+          ],
+        });
+
+        const text = completion.choices[0]?.message?.content;
+        if (!text) throw new Error("No response from AI");
+
+        const analysis = parseAnalysisJSON(text);
+
+        send({ stage: "done", data: analysis });
+      } catch (error) {
+        console.error("Analysis error:", error);
+        send({
+          stage: "error",
+          message: error instanceof Error ? error.message : "Analysis failed",
+        });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }
