@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { scrapeWebsite, mapSite, pickSecondaryPages, scrapeSecondaryPages } from "@/lib/dab/scraper";
 import { countMarkdownElements } from "@/lib/dab/parse";
 import { analyze } from "@/lib/dab/analyzer";
+import { enrichWithExa } from "@/lib/dab/exa";
 import type { SiteIntel } from "@/lib/dab/types";
 
 export const dynamic = "force-dynamic";
@@ -77,16 +78,42 @@ export async function POST(request: NextRequest) {
         if (signal.aborted) { close(); return; }
 
         const intel: SiteIntel = { primary: scraped, map: mapResult ?? undefined };
+        const brandName = scraped.metadata.title || scraped.metadata.ogTitle || "";
+
+        // Deep-scanning + Exa enrichment run in parallel
+        const parallelTasks: Promise<void>[] = [];
 
         if (mapResult && mapResult.links.length > 1) {
           const secondaryUrls = pickSecondaryPages(mapResult, url);
           if (secondaryUrls.length > 0) {
             send({ stage: "deep-scanning", data: { pages: secondaryUrls.length } });
-            const secondaryPages = await scrapeSecondaryPages(secondaryUrls, signal);
-            intel.secondaryPages = secondaryPages;
-            send({ stage: "deep-scanned", data: { pagesScraped: secondaryPages.length } });
+            parallelTasks.push(
+              scrapeSecondaryPages(secondaryUrls, signal).then((pages) => {
+                intel.secondaryPages = pages;
+                send({ stage: "deep-scanned", data: { pagesScraped: pages.length } });
+              }),
+            );
           }
         }
+
+        if (brandName) {
+          send({ stage: "enriching" });
+          parallelTasks.push(
+            enrichWithExa(brandName, url, signal).then((exa) => {
+              intel.exa = exa;
+              send({
+                stage: "enriched",
+                data: {
+                  industry: exa?.industry || null,
+                  competitors: exa?.competitors?.length || 0,
+                  socialChannels: exa?.socialProfiles?.length || 0,
+                },
+              });
+            }),
+          );
+        }
+
+        await Promise.all(parallelTasks);
 
         if (signal.aborted) { close(); return; }
         send({ stage: "analyzing" });

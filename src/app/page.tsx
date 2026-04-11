@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { AnalysisResult, ScrapedMeta } from "@/lib/dab/types";
 
 type ScanState = "idle" | "loading" | "success" | "error";
-type ScanStage = "mapping" | "mapping-done" | "scraping" | "scraped" | "deep-scanning" | "deep-scanned" | "analyzing" | "done" | "error" | null;
+type ScanStage = "mapping" | "mapping-done" | "scraping" | "scraped" | "deep-scanning" | "deep-scanned" | "enriching" | "enriched" | "analyzing" | "done" | "error" | null;
 
 const PAD = {
   paddingLeft: "clamp(1.25rem, 4vw, 2rem)",
@@ -355,7 +355,7 @@ function LoaderSkeletonCell({ label }: { label: string }) {
 }
 
 function stageOrder(stage: ScanStage): number {
-  const order: Record<string, number> = { mapping: 0, "mapping-done": 1, scraping: 2, scraped: 3, "deep-scanning": 4, "deep-scanned": 5, analyzing: 6, done: 7 };
+  const order: Record<string, number> = { mapping: 0, "mapping-done": 1, scraping: 2, scraped: 3, "deep-scanning": 4, "deep-scanned": 5, enriching: 5, enriched: 5, analyzing: 6, done: 7 };
   return stage ? (order[stage] ?? -1) : -1;
 }
 
@@ -438,6 +438,7 @@ function Scanning({
   // mapping-done and deep-scanned are transitional — show the previous visible stage
   const resolvedStage = scanStage === "mapping-done" ? "mapping"
     : scanStage === "deep-scanned" ? "deep-scanning"
+    : scanStage === "enriching" || scanStage === "enriched" ? "deep-scanning"
     : scanStage;
   const activeStage =
     ANALYSIS_STAGES.find((stage) => stage.key === resolvedStage) ?? null;
@@ -1235,6 +1236,10 @@ export default function Home() {
             setScanStage("deep-scanning");
           } else if (event.stage === "deep-scanned") {
             setScanStage("deep-scanned");
+          } else if (event.stage === "enriching") {
+            setScanStage("enriching");
+          } else if (event.stage === "enriched") {
+            setScanStage("enriched");
           } else if (event.stage === "analyzing") {
             setScanStage("analyzing");
           } else if (event.stage === "done") {

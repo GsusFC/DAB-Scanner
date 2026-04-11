@@ -1,70 +1,140 @@
 import type { SiteIntel } from "./types";
 
-export const SYSTEM_PROMPT = `You are a senior brand strategist and design expert at FLOC*, a Web3 strategic design studio. You analyze brands through the lens of the DAB* (Decentralized Autonomous Brand) framework. Your analysis is sharp, specific, and honest. You never give generic feedback — you always reference specific elements from the data.`;
+export const SYSTEM_PROMPT = `You are a senior brand strategist and design systems expert at FLOC*, a Web3 strategic design studio. You specialize in the DAB* (Decentralized Autonomous Brand) framework — evaluating whether a brand can operate, produce content, and maintain quality without direct founder involvement.
+
+Your analysis is:
+- SHARP: reference specific elements from the data, never give generic feedback
+- HONEST: low scores are acceptable and expected for early-stage brands
+- ACTIONABLE: every observation should point to something the brand can fix
+- DATA-DRIVEN: base scores on evidence from the extracted signals, not assumptions`;
+
+function buildBrandingBlock(intel: SiteIntel): string {
+  const b = intel.primary.branding;
+  if (!b) return "No branding data extracted from the site.";
+
+  return [
+    b.colors?.length ? `Colors in use: ${b.colors.join(", ")}` : "No color palette detected",
+    b.fonts?.length ? `Typefaces: ${b.fonts.join(", ")}` : "No fonts detected",
+    b.logos?.length ? `Logos: ${b.logos.length} detected` : "No logos detected",
+    b.personalityTraits?.length ? `Personality traits: ${b.personalityTraits.join(", ")}` : null,
+    b.typography ? `Typography system: ${JSON.stringify(b.typography)}` : null,
+    b.spacing ? `Spacing tokens: ${JSON.stringify(b.spacing)}` : null,
+  ].filter(Boolean).join("\n");
+}
+
+function buildMapBlock(intel: SiteIntel): string {
+  if (!intel.map) return "";
+  const m = intel.map;
+  return `
+Site structure (${m.totalPages} pages discovered):
+- Sections: ${m.sections.length > 0 ? m.sections.join(", ") : "No clearly identifiable sections"}
+- Navigation depth: ${m.maxDepth} levels
+- Sample URLs:\n${m.links.slice(0, 12).map((l) => `  ${l.url}`).join("\n")}`;
+}
+
+function buildCrossPageBlock(intel: SiteIntel): string {
+  if (!intel.secondaryPages?.length) return "";
+  return `
+Cross-page analysis (${intel.secondaryPages.length} internal pages scraped):
+${intel.secondaryPages.map((p, i) => {
+    const brandSignals = p.branding
+      ? `colors=${p.branding.colors?.join(",") || "none"}, fonts=${p.branding.fonts?.join(",") || "none"}`
+      : "no branding data";
+    return `--- Page ${i + 2}: ${p.url} ---
+Branding: ${brandSignals}
+Content preview:
+${p.markdown.slice(0, 2000)}`;
+  }).join("\n\n")}`;
+}
+
+function buildExaBlock(intel: SiteIntel): string {
+  if (!intel.exa) return "";
+  const e = intel.exa;
+  const parts: string[] = [];
+
+  if (e.industry) parts.push(`Industry: ${e.industry}`);
+  if (e.description) parts.push(`About: ${e.description}`);
+  if (e.employeeCount) parts.push(`Team size: ${e.employeeCount} employees`);
+  if (e.competitors?.length) parts.push(`Competitors: ${e.competitors.join(", ")}`);
+  if (e.categories?.length) parts.push(`Market categories: ${e.categories.join(", ")}`);
+  if (e.socialProfiles?.length) {
+    parts.push(`Social presence:\n${e.socialProfiles.map((s) =>
+      `  ${s.platform}: ${s.url}${s.followers ? ` (${s.followers} followers)` : ""}`
+    ).join("\n")}`);
+  }
+  if (e.recentNews?.length) {
+    parts.push(`Recent activity:\n${e.recentNews.map((n) => `  ${n}`).join("\n")}`);
+  }
+
+  return parts.length > 0 ? `\nMarket intelligence (external sources):\n${parts.join("\n")}` : "";
+}
 
 export function buildUserPrompt(intel: SiteIntel): string {
   const scraped = intel.primary;
   const content = scraped.markdown.slice(0, 8000);
-  const b = scraped.branding;
 
-  const brandingBlock = b
-    ? [
-        b.colors?.length ? `Colors: ${b.colors.join(", ")}` : null,
-        b.fonts?.length ? `Fonts: ${b.fonts.join(", ")}` : null,
-        b.logos?.length ? `Logos detected: ${b.logos.length}` : "No logos detected",
-        b.personalityTraits?.length ? `Brand personality: ${b.personalityTraits.join(", ")}` : null,
-        b.typography ? `Typography system: ${JSON.stringify(b.typography)}` : null,
-        b.spacing ? `Spacing system: ${JSON.stringify(b.spacing)}` : null,
-      ]
-        .filter(Boolean)
-        .join("\n")
-    : "No branding data available";
+  const hasMap = Boolean(intel.map);
+  const hasCrossPage = Boolean(intel.secondaryPages?.length);
+  const hasExa = Boolean(intel.exa);
 
-  return `Analyze this website's brand and return a structured JSON assessment.
+  return `Analyze this website's brand autonomy and return a structured JSON assessment.
 
-Website: ${scraped.metadata.ogTitle || scraped.metadata.title || "Unknown"}
-Description: ${scraped.metadata.description || scraped.metadata.ogDescription || "None"}
+== BRAND IDENTITY ==
+Name: ${scraped.metadata.ogTitle || scraped.metadata.title || "Unknown"}
+Description: ${scraped.metadata.description || scraped.metadata.ogDescription || "Not provided"}
 OG Image: ${scraped.metadata.ogImage || "None"}
 
-Visual identity (extracted from the live site):
-${brandingBlock}
+== VISUAL SYSTEM ==
+${buildBrandingBlock(intel)}
 
-Page content (markdown):
+== PAGE CONTENT ==
 ${content}
 
-${scraped.links && scraped.links.length > 0 ? `Links found on the page (${scraped.links.length} total):\n${scraped.links.slice(0, 30).join("\n")}` : ""}
+${scraped.links?.length ? `== LINK STRUCTURE (${scraped.links.length} links) ==\n${scraped.links.slice(0, 25).join("\n")}` : ""}
+${buildMapBlock(intel)}
+${buildCrossPageBlock(intel)}
+${buildExaBlock(intel)}
 
-${intel.map ? `Site structure (from sitemap scan):
-- Total discoverable pages: ${intel.map.totalPages}
-- Sections detected: ${intel.map.sections.length > 0 ? intel.map.sections.join(", ") : "None clearly identifiable"}
-- Maximum navigation depth: ${intel.map.maxDepth} levels
-- Sample pages:\n${intel.map.links.slice(0, 15).map((l) => l.url).join("\n")}` : ""}
+== SCORING INSTRUCTIONS ==
 
-${intel.secondaryPages && intel.secondaryPages.length > 0 ? `Cross-page analysis (${intel.secondaryPages.length} additional pages scraped):
+Score the brand on these 5 categories (0-100 each). Be precise — use the full range. A score of 30 is fine for a brand with real gaps.
 
-${intel.secondaryPages.map((p, i) => `--- Page ${i + 2}: ${p.url} ---\n${p.markdown}`).join("\n\n")}
+1. VISUAL SYSTEM (0-100)
+   Evaluate: color palette definition, typography hierarchy, logo presence and treatment, visual asset consistency.
+   ${intel.primary.branding ? "Use the extracted colors, fonts, and logo data above." : "Note: no branding data was extracted — score based on whatever visual signals appear in the content."}
+   Key question: Could an AI agent reproduce this visual identity consistently?
 
-Secondary page branding signals:
-${intel.secondaryPages.map((p) => p.branding ? `${p.url}: colors=${p.branding.colors?.join(",") || "none"}, fonts=${p.branding.fonts?.join(",") || "none"}` : `${p.url}: no branding data`).join("\n")}` : ""}
+2. VOICE (0-100)
+   Evaluate: tone distinctiveness, vocabulary patterns, messaging clarity, personality consistency.
+   ${hasCrossPage ? "Compare voice across the primary page and secondary pages — is the tone consistent?" : "Evaluate based on the copy visible on this single page."}
+   ${hasExa && intel.exa?.socialProfiles?.length ? "Consider that this brand has active social channels — voice should extend beyond the website." : ""}
+   Key question: Could an AI agent write in this brand's voice after studying these pages?
 
-Score the brand on these 5 categories (0-100 each):
-1. VISUAL SYSTEM — Logo presence, color consistency, typography hierarchy, visual identity strength. Can an AI agent reproduce the visual style consistently?
-2. VOICE — Tone of voice clarity, messaging consistency, copy quality, personality distinctiveness. Could an AI agent write in this brand's voice?
-3. ARCHITECTURE — ${intel.map ? "Use the site structure data above (page count, sections, depth, navigation patterns) to evaluate" : "Evaluate based on the visible navigation, link structure, and content hierarchy of this single page:"} information hierarchy, section organization, content structure, and user journey logic. Is the brand system logically organized?
-4. AUTONOMY — Overall: how well-codified is this brand? Could it operate without its founder? Is the brand system documented enough for AI execution?
-5. CONSISTENCY — ${intel.secondaryPages && intel.secondaryPages.length > 0 ? `Compare the primary page against the ${intel.secondaryPages.length} additional pages above. Look for visual identity drift (different colors, fonts, logo treatment), voice shifts (tone changes between sections), and structural inconsistencies. Score based on how unified the brand feels ACROSS pages.` : "Cross-element coherence: do visuals, voice, and architecture feel like one unified brand?"}
+3. ARCHITECTURE (0-100)
+   Evaluate: information hierarchy, navigation clarity, section organization, content coverage.
+   ${hasMap ? `Use the site structure data: ${intel.map!.totalPages} pages, ${intel.map!.sections.length} sections, depth ${intel.map!.maxDepth}.` : "Evaluate based on the visible navigation and link structure of this single page."}
+   ${hasExa && intel.exa?.industry ? `For a ${intel.exa.industry} company, assess whether key sections (about, product, blog, contact) are present and well-organized.` : ""}
+   Key question: Is the brand system logically organized for both humans and AI to navigate?
 
-For each, give a score and a short label (2-3 words max).
+4. AUTONOMY (0-100) — WEIGHTED DOUBLE
+   Evaluate: how codified is the brand system? Could someone (or an AI) execute brand-consistent output without the founder?
+   Consider: documented guidelines, repeatable patterns, asset availability, operational maturity.
+   ${hasExa && intel.exa?.employeeCount ? `Team of ${intel.exa.employeeCount} — factor in organizational maturity.` : ""}
+   Key question: How many days could this brand maintain quality output without its creator?
 
-Then provide:
-- An overall score using this exact formula: score = round((visual + voice + architecture + consistency + autonomy * 2) / 6). Do NOT deviate from this formula
-- "survivalDays": estimate how many days this brand could maintain quality output without its founder (1-365)
-- 3 specific strengths with title (max 5 words) and detail (1 sentence, referencing actual elements)
-- 3 specific weaknesses with title (max 5 words) and detail (1 sentence, referencing actual elements)
-- A one-line verdict (max 15 words) about the brand's autonomy readiness
-- The brand name (extract from the site title or headings)
+5. CONSISTENCY (0-100)
+   ${hasCrossPage ? `Compare the primary page against ${intel.secondaryPages!.length} additional pages. Look for: visual identity drift (color/font changes), voice shifts, structural inconsistencies. Score how unified the brand feels ACROSS pages.` : "Evaluate internal coherence within this single page — do visuals, voice, and structure feel like one unified system?"}
+   ${hasExa && intel.exa?.socialProfiles?.length ? "Consider whether the brand presence extends consistently to social channels." : ""}
+   Key question: Does everything feel like it belongs to the same brand?
 
-Respond ONLY with valid JSON in this exact format, no markdown, no code blocks:
+For each category, provide a score and a short label (2-3 words max, e.g. "Strong Voice", "Needs Work").
+
+== OUTPUT ==
+
+Calculate the overall score: score = round((visual + voice + architecture + consistency + autonomy * 2) / 6)
+Do NOT deviate from this formula.
+
+Respond ONLY with valid JSON, no markdown fences:
 {
   "score": number,
   "survivalDays": number,
@@ -75,9 +145,9 @@ Respond ONLY with valid JSON in this exact format, no markdown, no code blocks:
     "autonomy": { "score": number, "label": "string" },
     "consistency": { "score": number, "label": "string" }
   },
-  "strengths": [{ "title": "string", "detail": "string" }],
-  "weaknesses": [{ "title": "string", "detail": "string" }],
-  "verdict": "string",
+  "strengths": [{ "title": "string (max 5 words)", "detail": "string (1 sentence, reference specific elements)" }],
+  "weaknesses": [{ "title": "string (max 5 words)", "detail": "string (1 sentence, reference specific elements)" }],
+  "verdict": "string (max 15 words — the single-line brand autonomy verdict)",
   "brandName": "string"
 }`;
 }

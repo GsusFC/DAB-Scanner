@@ -30,10 +30,21 @@ export type MapResult = {
   links: { url: string; title?: string; description?: string }[];
 };
 
+export type ExaIntel = {
+  industry?: string;
+  competitors?: string[];
+  employeeCount?: string;
+  categories?: string[];
+  recentNews?: string[];
+  socialProfiles?: { platform: string; url: string; followers?: string }[];
+  description?: string;
+};
+
 export type SiteIntel = {
   primary: FirecrawlResult;
   map?: MapResult;
   secondaryPages?: { url: string; markdown: string; branding?: FirecrawlBranding }[];
+  exa?: ExaIntel;
 };
 
 export type AnalysisResult = {
