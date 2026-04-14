@@ -50,16 +50,21 @@ export async function POST(request: NextRequest) {
         // Phase 1: map + scrape + exa run in PARALLEL
         send({ stage: "scraping" });
 
-        const [scraped, mapResult, exaResult] = await Promise.all([
+        const normalizedUrl = url.startsWith("http") ? url : `https://${url}`;
+        let hostname = "unknown";
+        try { hostname = new URL(normalizedUrl).hostname; } catch { /* ignore */ }
+
+        const [scrapeResult, mapResult, exaResult] = await Promise.allSettled([
           scrapeWebsite(url, signal),
           mapSite(url, signal),
-          enrichWithExa(
-            new URL(url.startsWith("http") ? url : `https://${url}`).hostname,
-            url,
-            signal,
-          ),
+          enrichWithExa(hostname, url, signal),
         ]);
 
+        if (scrapeResult.status === "rejected") {
+          throw new Error(scrapeResult.reason instanceof Error ? scrapeResult.reason.message : "Failed to scrape website");
+        }
+
+        const scraped = scrapeResult.value;
         const counts = countMarkdownElements(scraped.markdown);
 
         send({
@@ -79,15 +84,18 @@ export async function POST(request: NextRequest) {
 
         if (signal.aborted) { close(); return; }
 
+        const map = mapResult.status === "fulfilled" ? mapResult.value : undefined;
+        const exa = exaResult.status === "fulfilled" ? exaResult.value : undefined;
+
         const intel: SiteIntel = {
           primary: scraped,
-          map: mapResult ?? undefined,
-          exa: exaResult ?? undefined,
+          map: map ?? undefined,
+          exa: exa ?? undefined,
         };
 
         // Phase 2: deep-scan only if time budget allows and map found pages
-        if (mapResult && mapResult.links.length > 1 && elapsed() < TIME_BUDGET_MS - 20_000) {
-          const secondaryUrls = pickSecondaryPages(mapResult, url);
+        if (map && map.links.length > 1 && elapsed() < TIME_BUDGET_MS - 20_000) {
+          const secondaryUrls = pickSecondaryPages(map, url);
           if (secondaryUrls.length > 0) {
             send({ stage: "deep-scanning", data: { pages: secondaryUrls.length } });
             const secondaryPages = await scrapeSecondaryPages(secondaryUrls, signal);
