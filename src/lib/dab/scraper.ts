@@ -6,37 +6,101 @@ function getFirecrawlKey(): string {
   return apiKey;
 }
 
-export async function scrapeWebsite(url: string, signal?: AbortSignal): Promise<FirecrawlResult> {
-  const response = await fetch("https://api.firecrawl.dev/v1/scrape", {
-    method: "POST",
+async function scrapeWithFirecrawl(url: string, signal?: AbortSignal): Promise<FirecrawlResult | null> {
+  const apiKey = process.env.FIRECRAWL_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const response = await fetch("https://api.firecrawl.dev/v1/scrape", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        url,
+        formats: ["markdown", "links", "screenshot", "branding"],
+        onlyMainContent: false,
+        timeout: 30000,
+      }),
+      signal,
+    });
+
+    if (!response.ok) return null;
+
+    const json = await response.json();
+    if (!json.success) return null;
+
+    return {
+      markdown: json.data?.markdown || "",
+      metadata: json.data?.metadata || {},
+      links: json.data?.links || [],
+      screenshot: json.data?.screenshot || undefined,
+      branding: json.data?.branding || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<FirecrawlResult> {
+  const response = await fetch(url, {
     headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getFirecrawlKey()}`,
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml",
     },
-    body: JSON.stringify({
-      url,
-      formats: ["markdown", "links", "screenshot", "branding"],
-      onlyMainContent: false,
-      timeout: 30000,
-    }),
     signal,
   });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Firecrawl error (${response.status}): ${errorText}`);
-  }
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const html = await response.text();
 
-  const json = await response.json();
-  if (!json.success) throw new Error(json.error || "Firecrawl scrape failed");
+  // Extract metadata with regex (no cheerio)
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  const descMatch = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+  const ogTitleMatch = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i);
+  const ogDescMatch = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i);
+  const ogImageMatch = html.match(/<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i);
+
+  // Extract visible text — strip tags, scripts, styles
+  const cleaned = html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, "\n")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 8000);
+
+  // Extract links
+  const linkMatches = html.matchAll(/<a[^>]+href=["']([^"'#][^"']*)["']/gi);
+  const links = [...linkMatches].map((m) => {
+    try {
+      return new URL(m[1], url).href;
+    } catch {
+      return m[1];
+    }
+  }).slice(0, 30);
 
   return {
-    markdown: json.data?.markdown || "",
-    metadata: json.data?.metadata || {},
-    links: json.data?.links || [],
-    screenshot: json.data?.screenshot || undefined,
-    branding: json.data?.branding || undefined,
+    markdown: cleaned,
+    metadata: {
+      title: titleMatch?.[1]?.trim(),
+      description: descMatch?.[1],
+      ogTitle: ogTitleMatch?.[1],
+      ogDescription: ogDescMatch?.[1],
+      ogImage: ogImageMatch?.[1],
+    },
+    links,
   };
+}
+
+export async function scrapeWebsite(url: string, signal?: AbortSignal): Promise<FirecrawlResult> {
+  // Try Firecrawl first, fall back to basic fetch
+  const firecrawlResult = await scrapeWithFirecrawl(url, signal);
+  if (firecrawlResult) return firecrawlResult;
+
+  console.log("Firecrawl unavailable, using fetch fallback");
+  return scrapeWithFetch(url, signal);
 }
 
 const KNOWN_SECTIONS = [
@@ -82,6 +146,8 @@ function computeMaxDepth(links: { url: string }[], baseUrl: string): number {
 }
 
 export async function mapSite(url: string, signal?: AbortSignal): Promise<MapResult | undefined> {
+  if (!process.env.FIRECRAWL_API_KEY) return undefined;
+
   try {
     const response = await fetch("https://api.firecrawl.dev/v1/map", {
       method: "POST",
