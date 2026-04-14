@@ -8,6 +8,8 @@ import type { SiteIntel } from "@/lib/dab/types";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+const TIME_BUDGET_MS = 50_000; // leave 10s headroom for LLM
+
 export async function POST(request: NextRequest) {
   let body: { url?: string };
   try {
@@ -32,6 +34,7 @@ export async function POST(request: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      const startTime = Date.now();
       const send = (event: Record<string, unknown>) => {
         if (signal.aborted) return;
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
@@ -39,25 +42,24 @@ export async function POST(request: NextRequest) {
 
       let closed = false;
       const close = () => { if (!closed) { closed = true; controller.close(); } };
+      const elapsed = () => Date.now() - startTime;
 
       try {
         if (signal.aborted) { close(); return; }
-        send({ stage: "mapping" });
 
-        const mapResult = await mapSite(url, signal);
-
-        send({
-          stage: "mapping-done",
-          data: {
-            totalPages: mapResult?.totalPages ?? 0,
-            sections: mapResult?.sections ?? [],
-          },
-        });
-
-        if (signal.aborted) { close(); return; }
+        // Phase 1: map + scrape + exa run in PARALLEL
         send({ stage: "scraping" });
 
-        const scraped = await scrapeWebsite(url, signal);
+        const [scraped, mapResult, exaResult] = await Promise.all([
+          scrapeWebsite(url, signal),
+          mapSite(url, signal),
+          enrichWithExa(
+            new URL(url.startsWith("http") ? url : `https://${url}`).hostname,
+            url,
+            signal,
+          ),
+        ]);
+
         const counts = countMarkdownElements(scraped.markdown);
 
         send({
@@ -77,45 +79,26 @@ export async function POST(request: NextRequest) {
 
         if (signal.aborted) { close(); return; }
 
-        const intel: SiteIntel = { primary: scraped, map: mapResult ?? undefined };
-        const brandName = scraped.metadata.title || scraped.metadata.ogTitle || "";
+        const intel: SiteIntel = {
+          primary: scraped,
+          map: mapResult ?? undefined,
+          exa: exaResult ?? undefined,
+        };
 
-        // Deep-scanning + Exa enrichment run in parallel
-        const parallelTasks: Promise<void>[] = [];
-
-        if (mapResult && mapResult.links.length > 1) {
+        // Phase 2: deep-scan only if time budget allows and map found pages
+        if (mapResult && mapResult.links.length > 1 && elapsed() < TIME_BUDGET_MS - 20_000) {
           const secondaryUrls = pickSecondaryPages(mapResult, url);
           if (secondaryUrls.length > 0) {
             send({ stage: "deep-scanning", data: { pages: secondaryUrls.length } });
-            parallelTasks.push(
-              scrapeSecondaryPages(secondaryUrls, signal).then((pages) => {
-                intel.secondaryPages = pages;
-                send({ stage: "deep-scanned", data: { pagesScraped: pages.length } });
-              }),
-            );
+            const secondaryPages = await scrapeSecondaryPages(secondaryUrls, signal);
+            intel.secondaryPages = secondaryPages;
+            send({ stage: "deep-scanned", data: { pagesScraped: secondaryPages.length } });
           }
         }
 
-        if (brandName) {
-          send({ stage: "enriching" });
-          parallelTasks.push(
-            enrichWithExa(brandName, url, signal).then((exa) => {
-              intel.exa = exa;
-              send({
-                stage: "enriched",
-                data: {
-                  industry: exa?.industry || null,
-                  competitors: exa?.competitors?.length || 0,
-                  socialChannels: exa?.socialProfiles?.length || 0,
-                },
-              });
-            }),
-          );
-        }
-
-        await Promise.all(parallelTasks);
-
         if (signal.aborted) { close(); return; }
+
+        // Phase 3: LLM analysis
         send({ stage: "analyzing" });
         const result = await analyze(intel, signal);
 
