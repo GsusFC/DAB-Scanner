@@ -94,12 +94,44 @@ async function scrapeWithFetch(url: string, signal?: AbortSignal): Promise<Firec
   };
 }
 
+async function scrapeWithJina(url: string, signal?: AbortSignal): Promise<FirecrawlResult | null> {
+  try {
+    const response = await fetch(`https://r.jina.ai/${url}`, {
+      headers: {
+        Accept: "application/json",
+        "X-Return-Format": "markdown",
+      },
+      signal,
+    });
+
+    if (!response.ok) return null;
+    const json = await response.json();
+
+    return {
+      markdown: json.data?.content || "",
+      metadata: {
+        title: json.data?.title || undefined,
+        description: json.data?.description || undefined,
+      },
+      links: json.data?.links || [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function scrapeWebsite(url: string, signal?: AbortSignal): Promise<FirecrawlResult> {
-  // Try Firecrawl first, fall back to basic fetch
+  // Tier 1: Firecrawl (branding + screenshot + JS rendering)
   const firecrawlResult = await scrapeWithFirecrawl(url, signal);
   if (firecrawlResult) return firecrawlResult;
 
-  console.log("Firecrawl unavailable, using fetch fallback");
+  // Tier 2: Jina Reader (JS rendering, free, no branding)
+  console.log("Firecrawl unavailable, trying Jina Reader");
+  const jinaResult = await scrapeWithJina(url, signal);
+  if (jinaResult) return jinaResult;
+
+  // Tier 3: Basic fetch (static HTML only)
+  console.log("Jina unavailable, using fetch fallback");
   return scrapeWithFetch(url, signal);
 }
 
